@@ -63,6 +63,45 @@ different desktop" is a five-minute command rather than a backup-and-reinstall w
 
 ---
 
+## Install for end users (any country)
+
+The GitHub Actions workflow publishes a ready-to-boot image to GHCR every week (and on demand).
+There is no 5 GB download, no build step and no registry credentials — just a small image pull
+from GitHub's CDN.
+
+On a machine that already has RakuOS:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/DivinusX/ryoraku/master/install.sh | bash
+```
+
+Or manually:
+
+```sh
+sudo bootc switch --retain ghcr.io/divinusx/ryoraku:latest
+sudo reboot
+```
+
+RakuOS's containers policy already allows `ghcr.io` without a signature, so no key or policy
+editing is needed. Your current deployment is kept for rollback:
+
+```sh
+sudo bootc rollback && sudo reboot
+```
+
+At the greeter choose **Ryoku (Hyprland)**.
+
+### Updates for end users
+
+```sh
+sudo bootc upgrade     # new RakuOS base + new Ryoku desktop, atomically
+rum update             # refresh the packages you installed yourself
+```
+
+That is the whole maintenance routine. No archives, no local build, no cross-border file transfer.
+
+---
+
 ## Status
 
 The image is built as `localhost/ryoku-on-rakuos:test` and passes `./smoke-test.sh` (20 checks:
@@ -169,7 +208,9 @@ ln -sf ../ryoku-session.target ~/.config/systemd/user/graphical-session.target.w
 
 ---
 
-## Simple update workflow
+## Simple update workflow (maintainers)
+
+End users do **not** need this section — they just run `sudo bootc upgrade`.
 
 When RakuOS or Ryoku publishes an update, the whole build side is one command on the build machine:
 

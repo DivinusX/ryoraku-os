@@ -1,0 +1,85 @@
+name: Build and publish Ryoraku OS
+
+# Publishes a ready-to-boot bootc image to GHCR. End users then only need
+# `sudo bootc switch ghcr.io/<owner>/ryoraku:latest` once, and
+# `sudo bootc upgrade` for every later update. RakuOS's containers policy
+# already allows ghcr.io without a signature, so no key setup is needed.
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'   # every Monday, 06:00 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: image-build
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      BASE_REPO: quay.io/rakuos/rakuos-hyprland
+      BASE_TAG: latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space on the runner
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost \
+                      "$AGENT_TOOLSDIRECTORY" /usr/local/lib/android || true
+          df -h /
+
+      - name: Install podman
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman
+
+      - name: Resolve lowercase GHCR image name
+        run: |
+          owner=$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE=ghcr.io/${owner}/ryoraku:latest" >> "$GITHUB_ENV"
+
+      - name: Log in to GHCR
+        run: |
+          printf '%s' '${{ secrets.GITHUB_TOKEN }}' | \
+            sudo podman login ghcr.io -u '${{ github.actor }}' --password-stdin
+
+      - name: Build chunkah layers
+        run: |
+          sudo podman build --security-opt label=disable \
+            --build-arg BASE_IMAGE_TAG="${BASE_TAG}" \
+            -v "$PWD":/run/src \
+            -t localhost/ryoraku-chunkah:temp \
+            --target chunkah .
+
+      - name: Build final bootc image
+        run: |
+          sudo podman build --security-opt label=disable \
+            --build-arg BASE_IMAGE_TAG="${BASE_TAG}" \
+            -v "$PWD":/run/src \
+            -t "${IMAGE}" \
+            --target final .
+
+      - name: Push image to GHCR
+        run: sudo podman push "${IMAGE}"
+
+      - name: Make the package public
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          owner=$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
+          gh api -X PATCH \
+            "/users/${owner}/packages/container/ryoraku" \
+            -f visibility=public || true
+
+      - name: Summary
+        run: |
+          echo "Published ${IMAGE}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Users install with: sudo bootc switch ${IMAGE}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Users update with:  sudo bootc upgrade" >> "$GITHUB_STEP_SUMMARY"
