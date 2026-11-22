@@ -11,6 +11,10 @@
 ARG BASE_IMAGE_REPO="quay.io/rakuos/rakuos-hyprland"
 ARG BASE_IMAGE_TAG="latest"
 ARG CHUNKAH_CONFIG_STR
+# Upstream fingerprint (Ryoku release + RakuOS base digest), used by CI to
+# decide whether a rebuild is needed. Declared globally so the final stage can
+# consume it as an image label.
+ARG SOURCE_FINGERPRINT="unknown"
 
 # Build scripts are mounted into RUN steps, not copied into the final image.
 FROM scratch AS ctx
@@ -58,4 +62,6 @@ RUN --mount=from=builder,src=/,target=/chunkah,ro \
 
 # Two-stage build: the final stage reads the archive written by chunkah.
 FROM oci-archive:out.ociarchive AS final
+ARG SOURCE_FINGERPRINT
 LABEL containers.bootc=1
+LABEL org.ryoraku.fingerprint="${SOURCE_FINGERPRINT}"

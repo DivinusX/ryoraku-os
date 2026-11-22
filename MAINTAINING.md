@@ -14,16 +14,23 @@ Short runbook for the person publishing images. End-user docs live in `README.md
 
 ## 1. Publish an update
 
-The `.github/workflows/build-image.yml` workflow publishes to GHCR every Monday at 06:00 UTC and
-on demand.
+The `.github/workflows/build-image.yml` workflow is fully automated:
 
-1. Optional: run `./update.sh` locally first to verify the build and refresh `build_files/RYOKU_REF`.
-2. Push any changes (including a `RYOKU_REF` bump).
-3. In GitHub: **Actions → Build and publish Ryoraku OS → Run workflow**.
-4. Wait for the job to finish, then confirm:
-   - the image `ghcr.io/divinusx/ryoraku:latest` was pushed,
-   - the package is **public** (the workflow attempts this; otherwise set it once in the UI),
-   - the image has the `containers.bootc=1` label.
+1. **Daily check** (and on demand): it computes a fingerprint from the latest Ryoku release tag
+   plus the RakuOS base image digest, and compares it with the label
+   `org.ryoraku.fingerprint` on the published GHCR image.
+2. **If nothing changed**, the build is skipped — no wasted runner time.
+3. **If something changed**, it pins the new `RYOKU_REF`, builds both stages, runs
+   `image-check.sh` **inside the image**, pushes to GHCR, makes the package public and creates a
+   GitHub Release containing the exact digest.
+4. To force a rebuild without an upstream change, run the workflow manually with **force** checked.
+
+What you still do:
+
+- Watch the Actions run for failures (the in-image smoke test is the gate).
+- Confirm once that the GHCR package `ryoraku` is public.
+- Spot-check a real boot after a release, then point users at the new digest if needed.
+- Optional: run `./update.sh` locally to verify a build before pushing changes.
 
 Users update with `sudo bootc upgrade` + `rum update`. No tar files, no local builds.
 

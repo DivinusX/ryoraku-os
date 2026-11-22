@@ -1,30 +1,94 @@
 name: Build and publish Ryoraku OS
 
-# Publishes a ready-to-boot bootc image to GHCR. End users then only need
-# `sudo bootc switch ghcr.io/<owner>/ryoraku:latest` once, and
-# `sudo bootc upgrade` for every later update. RakuOS's containers policy
-# already allows ghcr.io without a signature, so no key setup is needed.
+# Fully automated release pipeline:
+#   1. detect changes in RakuOS base + Ryoku release
+#   2. rebuild only when something changed (or when forced)
+#   3. run the image smoke test inside the built image
+#   4. publish to GHCR and create a GitHub Release with the digest
+# Users then only need `sudo bootc upgrade`.
 
 on:
   schedule:
-    - cron: '0 6 * * 1'   # every Monday, 06:00 UTC
+    - cron: '0 6 * * *'   # daily; the check job skips unchanged builds
   workflow_dispatch:
+    inputs:
+      force:
+        description: 'Rebuild even if upstream is unchanged'
+        type: boolean
+        default: false
 
 concurrency:
   group: image-build
   cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
+env:
+  BASE_REPO: quay.io/rakuos/rakuos-hyprland
+  BASE_TAG: latest
+
 jobs:
-  build:
+  prepare:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    outputs:
+      changed: ${{ steps.check.outputs.changed }}
+      fingerprint: ${{ steps.check.outputs.fingerprint }}
+      ryoku_ref: ${{ steps.check.outputs.ryoku_ref }}
+      image: ${{ steps.check.outputs.image }}
+    steps:
+      - name: Install inspection tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq skopeo jq >/dev/null
+
+      - name: Log in to GHCR for inspection
+        run: |
+          printf '%s' '${{ secrets.GITHUB_TOKEN }}' | \
+            skopeo login ghcr.io -u '${{ github.actor }}' --password-stdin
+
+      - name: Compare upstream state with published image
+        id: check
+        env:
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -euo pipefail
+          owner=$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
+          image="ghcr.io/${owner}/ryoraku:latest"
+
+          ryoku_ref=$(curl -fsSL https://api.github.com/repos/Ryoku-dev/ryoku/releases/latest \
+            | jq -r '.tag_name // empty')
+          [ -n "${ryoku_ref}" ] || ryoku_ref="$(cat build_files/RYOKU_REF 2>/dev/null || echo v1.1.0)"
+
+          base_digest=$(skopeo inspect "docker://${BASE_REPO}:${BASE_TAG}" | jq -r '.Digest')
+          short_digest=$(printf '%s' "${base_digest#sha256:}" | cut -c1-12)
+          fingerprint="${ryoku_ref}-${short_digest}"
+
+          published=$(skopeo inspect "docker://${image}" 2>/dev/null \
+            | jq -r '.Labels["org.ryoraku.fingerprint"] // ""' || true)
+
+          if [ "${published}" = "${fingerprint}" ] && [ "${FORCE}" != "true" ]; then
+            changed=false
+            echo "Upstream unchanged (${fingerprint}); skipping build."
+          else
+            changed=true
+            echo "Upstream changed: '${published}' -> '${fingerprint}'."
+          fi
+
+          echo "changed=${changed}" >> "$GITHUB_OUTPUT"
+          echo "fingerprint=${fingerprint}" >> "$GITHUB_OUTPUT"
+          echo "ryoku_ref=${ryoku_ref}" >> "$GITHUB_OUTPUT"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: prepare
+    if: needs.prepare.outputs.changed == 'true'
+    runs-on: ubuntu-latest
     env:
-      BASE_REPO: quay.io/rakuos/rakuos-hyprland
-      BASE_TAG: latest
+      IMAGE: ${{ needs.prepare.outputs.image }}
+      FINGERPRINT: ${{ needs.prepare.outputs.fingerprint }}
+      RYOKU_REF: ${{ needs.prepare.outputs.ryoku_ref }}
     steps:
       - uses: actions/checkout@v4
 
@@ -36,13 +100,11 @@ jobs:
 
       - name: Install podman
         run: |
-          sudo apt-get update
-          sudo apt-get install -y podman
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq podman >/dev/null
 
-      - name: Resolve lowercase GHCR image name
-        run: |
-          owner=$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
-          echo "IMAGE=ghcr.io/${owner}/ryoraku:latest" >> "$GITHUB_ENV"
+      - name: Pin the detected Ryoku release
+        run: printf '%s\n' "${RYOKU_REF}" > build_files/RYOKU_REF
 
       - name: Log in to GHCR
         run: |
@@ -53,6 +115,7 @@ jobs:
         run: |
           sudo podman build --security-opt label=disable \
             --build-arg BASE_IMAGE_TAG="${BASE_TAG}" \
+            --build-arg SOURCE_FINGERPRINT="${FINGERPRINT}" \
             -v "$PWD":/run/src \
             -t localhost/ryoraku-chunkah:temp \
             --target chunkah .
@@ -61,9 +124,16 @@ jobs:
         run: |
           sudo podman build --security-opt label=disable \
             --build-arg BASE_IMAGE_TAG="${BASE_TAG}" \
+            --build-arg SOURCE_FINGERPRINT="${FINGERPRINT}" \
             -v "$PWD":/run/src \
             -t "${IMAGE}" \
             --target final .
+
+      - name: Smoke test the built image
+        run: |
+          sudo podman run --rm \
+            -v "$PWD/image-check.sh":/image-check.sh:ro \
+            "${IMAGE}" /bin/bash /image-check.sh
 
       - name: Push image to GHCR
         run: sudo podman push "${IMAGE}"
@@ -74,12 +144,35 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           owner=$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
-          gh api -X PATCH \
-            "/users/${owner}/packages/container/ryoraku" \
+          gh api -X PATCH "/users/${owner}/packages/container/ryoraku" \
             -f visibility=public || true
+
+      - name: Create a GitHub Release with the digest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y -qq skopeo jq >/dev/null
+          digest=$(skopeo inspect "docker://${IMAGE}" | jq -r '.Digest')
+          tag="image-$(date -u +%Y%m%d-%H%M)"
+          {
+            echo "Automated image rebuild."
+            echo
+            echo "- Ryoku source: \`${RYOKU_REF}\`"
+            echo "- RakuOS base: \`${BASE_REPO}:${BASE_TAG}\`"
+            echo "- Upstream fingerprint: \`${FINGERPRINT}\`"
+            echo "- GHCR image: \`${IMAGE}\`"
+            echo "- Digest: \`${digest}\`"
+            echo
+            echo "Pin this exact image with:"
+            echo "\`\`\`sh"
+            echo "sudo bootc switch ${IMAGE}@${digest}"
+            echo "\`\`\`"
+          } > release-notes.md
+          gh release create "${tag}" --title "${tag}" --notes-file release-notes.md
 
       - name: Summary
         run: |
           echo "Published ${IMAGE}" >> "$GITHUB_STEP_SUMMARY"
-          echo "Users install with: sudo bootc switch ${IMAGE}" >> "$GITHUB_STEP_SUMMARY"
-          echo "Users update with:  sudo bootc upgrade" >> "$GITHUB_STEP_SUMMARY"
+          echo "Fingerprint: ${FINGERPRINT}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Users update with: sudo bootc upgrade" >> "$GITHUB_STEP_SUMMARY"

@@ -67,9 +67,10 @@ different desktop" is a five-minute command rather than a backup-and-reinstall w
 
 ## Install for end users (any country)
 
-The GitHub Actions workflow publishes a ready-to-boot image to GHCR every week (and on demand).
-There is no 5 GB download, no build step and no registry credentials — just a small image pull
-from GitHub's CDN.
+The GitHub Actions workflow checks upstream daily and publishes a ready-to-boot image to GHCR
+only when RakuOS or Ryoku actually changes (it also runs on demand). Each successful build is
+smoke-tested inside the image and released with its exact digest. There is no 5 GB download, no
+build step and no registry credentials — just a small image pull from GitHub's CDN.
 
 On a machine that already has RakuOS:
 
