@@ -115,7 +115,12 @@ rum install -y ryoku ryoku-keyring ryoku-desktop ryoku-desktop-hyprland
 # system the shell installer does that; here we bake the same files into the
 # image so `ryoku materialize` can compose them into /etc/skel.
 src=$(mktemp -d /var/tmp/ryoku-src.XXXXXX)
-git clone --depth 1 --branch v1.1.0 https://github.com/Ryoku-dev/ryoku.git "${src}"
+# The exact Ryoku source tag is pinned in build_files/RYOKU_REF so updates are
+# reproducible; update.sh refreshes it from GitHub's latest release.
+ryoku_ref=$(tr -d '[:space:]' </ctx/RYOKU_REF 2>/dev/null || echo v1.1.0)
+[ -n "${ryoku_ref}" ] || ryoku_ref=v1.1.0
+echo "[ryoku-on-rakuos] Ryoku source ref: ${ryoku_ref}"
+git clone --depth 1 --branch "${ryoku_ref}" https://github.com/Ryoku-dev/ryoku.git "${src}"
 
 qmldir=/usr/lib64/qt6/qml
 "${src}/ryoku/ui/install.sh" "${qmldir}"

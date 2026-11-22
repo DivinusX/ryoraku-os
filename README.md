@@ -169,6 +169,31 @@ ln -sf ../ryoku-session.target ~/.config/systemd/user/graphical-session.target.w
 
 ---
 
+## Simple update workflow
+
+When RakuOS or Ryoku publishes an update, the whole build side is one command on the build machine:
+
+```sh
+./update.sh
+```
+
+It pulls the newest RakuOS base image, checks GitHub for the newest Ryoku release (and updates
+`build_files/RYOKU_REF` if needed — Ryoku RPMs are always taken fresh from the signed repo),
+rebuilds both stages, exports `ryoraku-os.image.tar` and prints its SHA256.
+
+Then, on the laptop:
+
+```sh
+# copy the two files over (scp / USB / local HTTP server)
+./laptop-install.sh ryoraku-os.image.tar
+sudo reboot
+rum update
+```
+
+That updates the RakuOS base and the Ryoku desktop **together, atomically**, while `rum update`
+refreshes only the packages you installed yourself. No formatting, no reinstall, and the previous
+deployment stays available via `sudo bootc rollback`.
+
 ## Maintenance
 
 Three independent update lanes:
