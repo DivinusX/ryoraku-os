@@ -16,6 +16,8 @@ installed into the image at build time.
 > There is no Arch/pacman layer in this image. Ryoku ships its desktop as signed **Fedora RPMs**,
 > so both the RakuOS base and the Ryoku desktop are RPM-based.
 
+Maintainers: see [MAINTAINING.md](MAINTAINING.md) for the publishing and testing runbook.
+
 ---
 
 ## Why this is a good idea
