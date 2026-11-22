@@ -83,13 +83,64 @@ sudo reboot
 ```
 
 RakuOS's containers policy already allows `ghcr.io` without a signature, so no key or policy
-editing is needed. Your current deployment is kept for rollback:
+editing is needed. At the greeter choose **Ryoku (Hyprland)**.
 
-```sh
-sudo bootc rollback && sudo reboot
-```
+### Rollback — step by step
 
-At the greeter choose **Ryoku (Hyprland)**.
+Every update is a new bootc deployment, and the previous one is never deleted. If an update
+breaks something, you can go back in a couple of minutes. Nothing in `/home` or your user config
+is lost.
+
+**Case A — the system boots, but something is broken (shell, apps, drivers):**
+
+1. Open a terminal and check what is currently booted:
+
+   ```sh
+   sudo bootc status
+   ```
+
+   You will see a `Booted image` and a `Rollback image`.
+
+2. Set the previous deployment as the next boot target:
+
+   ```sh
+   sudo bootc rollback
+   ```
+
+3. Reboot:
+
+   ```sh
+   sudo reboot
+   ```
+
+4. After the reboot, confirm you are back on the older image:
+
+   ```sh
+   sudo bootc status
+   ```
+
+   The digest shown under `Booted image` should match the old `Rollback image` from step 1.
+
+**Case B — the system does not boot at all:**
+
+1. Power on and hold `Shift` (or press `Esc`) to show the GRUB menu.
+2. Select the **older** deployment entry — the previous `RakuOS Hyprland` generation, not the
+   newest `Ryoraku` entry. Boot it.
+3. Once logged in, run `sudo bootc rollback && sudo reboot` so the bootloader keeps using that
+   older deployment by default.
+
+**After a rollback:**
+
+- `sudo bootc upgrade` may immediately offer the same broken image again. Skip it until a newer
+  image is published, or pin a known-good one with:
+
+  ```sh
+  sudo bootc switch ghcr.io/divinusx/ryoraku@sha256:<known-good-digest>
+  ```
+
+- To try the newest image again later, just run `sudo bootc upgrade`.
+- If an app you installed yourself stops working after the switch, fix it with `rum update` or
+  reinstall it with `rum install <package>` — the base rollback does not touch your own packages.
 
 ### Updates for end users
 
