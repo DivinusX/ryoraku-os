@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" alt="Ryoraku OS" width="520" />
+  <img src="assets/logo.png" alt="Ryoraku OS" width="340" />
 </p>
 
 # Ryoraku OS
