@@ -1,0 +1,9 @@
+# Imágenes grandes generadas localmente (NO subir al repo)
+out.ociarchive
+*.image.tar
+*.ociarchive
+*.tar
+*.tar.gz
+
+# Podman / buildah temporales
+.containers/
